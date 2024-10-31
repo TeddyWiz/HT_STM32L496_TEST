@@ -33,6 +33,91 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define VDDA_APPLI                     ((uint32_t) 3300)    /* Value of analog voltage supply Vdda (unit: mV) */
+#define RANGE_12BITS                   ((uint32_t) 4095)    /* Max digital value with a full range of 12 bits */
+
+/* ADC parameters */
+#define ADCCONVERTEDVALUES_BUFFER_SIZE ((uint32_t)    3)    /* Size of array containing ADC converted values: set to ADC sequencer number of ranks converted, to have a rank in each address */
+
+/* Internal temperature sensor: constants data used for indicative values in  */
+/* this example. Refer to device datasheet for min/typ/max values.            */
+/* For more accurate values, device should be calibrated on offset and slope  */
+/* for application temperature range.                                         */
+#define INTERNAL_TEMPSENSOR_V30        ((int32_t)760)           /* Internal temperature sensor, parameter V25 (unit: mV). Refer to device datasheet for min/typ/max values. */
+#define INTERNAL_TEMPSENSOR_AVGSLOPE   ((int32_t)2500)          /* Internal temperature sensor, parameter Avg_Slope (unit: uV/DegCelsius). Refer to device datasheet for min/typ/max values. */
+#define TEMP30_CAL_ADDR   ((uint16_t*) ((uint32_t)0x1FFF75A8))  /* Internal temperature sensor, parameter TS_CAL1: TS ADC raw data acquired at a temperature of 30 DegC (+-5 DegC) */
+#define TEMP110_CAL_ADDR  ((uint16_t*) ((uint32_t)0x1FFF75CA))  /* Internal temperature sensor, parameter TS_CAL2: TS ADC raw data acquired at a temperature of  110 DegC (+-5 DegC) */
+#define VDDA_TEMP_CAL                  ((uint32_t)3000)        /* Vdda value with which temperature sensor has been calibrated in production (+-10 mV). */
+
+/**
+  * @brief  Computation of temperature (unit: degree Celsius) from the internal
+  *         temperature sensor measurement by ADC.
+  *         Computation is using temperature sensor calibration values done
+  *         in production.
+  *         Computation formula:
+  *         Temperature = (TS_ADC_DATA - TS_CAL1) * (110degC - 30degC)
+  *                       / (TS_CAL2 - TS_CAL1) + 30degC
+  *         with TS_ADC_DATA = temperature sensor raw data measured by ADC
+  *              Avg_Slope = (TS_CAL2 - TS_CAL1) / (110 - 30)
+  *              TS_CAL1 = TS_ADC_DATA @30degC (calibrated in factory)
+  *              TS_CAL2 = TS_ADC_DATA @110degC (calibrated in factory)
+  *         Calculation validity conditioned to settings: 
+  *          - ADC resolution 12 bits (need to scale conversion value 
+  *            if using a different resolution).
+  *          - Power supply of analog voltage set to literal VDDA_APPLI
+  *            (need to scale value if using a different value of analog
+  *            voltage supply).
+  * @param TS_ADC_DATA: Temperature sensor digital value measured by ADC
+  * @retval None
+  */
+#define COMPUTATION_TEMPERATURE_TEMP30_TEMP110(TS_ADC_DATA)                    \
+  (((( ((int32_t)((TS_ADC_DATA * VDDA_APPLI) / VDDA_TEMP_CAL)                  \
+        - (int32_t) *TEMP30_CAL_ADDR)                                          \
+     ) * (int32_t)(110 - 30)                                                   \
+    ) / (int32_t)(*TEMP110_CAL_ADDR - *TEMP30_CAL_ADDR)                        \
+   ) + 30                                                                      \
+  )
+
+/**
+  * @brief  Computation of temperature (unit: degree Celsius) from the internal
+  *         temperature sensor measurement by ADC.
+  *         Computation is using temperature sensor standard parameters (refer
+  *         to device datasheet).
+  *         Computation formula:
+  *         Temperature = (VTS - V30)/Avg_Slope + 30
+  *         with VTS = temperature sensor voltage
+  *              Avg_Slope = temperature sensor slope (unit: uV/DegCelsius)
+  *              V30 = temperature sensor @30degC and Vdda defined at VDDA_TEMP_CAL (unit: mV)
+  *         Calculation validity conditioned to settings: 
+  *          - ADC resolution 12 bits (need to scale value if using a different 
+  *            resolution).
+  *          - Power supply of analog voltage set to literal VDDA_APPLI
+  *            (need to scale value if using a different value of analog
+  *            voltage supply).
+  * @param TS_ADC_DATA: Temperature sensor digital value measured by ADC
+  * @retval None
+  */
+#define COMPUTATION_TEMPERATURE_STD_PARAMS_AVGSLOPE_V30(TS_ADC_DATA)           \
+  ((( ((int32_t)(((TS_ADC_DATA) * VDDA_APPLI) / RANGE_12BITS)                  \
+       - (int32_t)(INTERNAL_TEMPSENSOR_V30)                                    \
+      ) * 1000                                                                 \
+    ) / INTERNAL_TEMPSENSOR_AVGSLOPE                                           \
+   ) + 30                                                                      \
+  )
+
+/**
+  * @brief  Computation of voltage (unit: mV) from ADC measurement digital
+  *         value on range 12 bits.
+  *         Calculation validity conditioned to settings: 
+  *          - ADC resolution 12 bits (need to scale value if using a different 
+  *            resolution).
+  *          - Power supply of analog voltage Vdda 3.3V (need to scale value 
+  *            if using a different analog voltage supply value).
+  * @param ADC_DATA: Digital value measured by ADC
+  * @retval None
+  */
+#define COMPUTATION_DIGITAL_12BITS_TO_VOLTAGE(ADC_DATA)                        \
+  ( ((ADC_DATA) * VDDA_APPLI) / RANGE_12BITS)
 
 /* USER CODE END PD */
 
@@ -43,7 +128,9 @@
 
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
+ADC_HandleTypeDef hadc2;
 DMA_HandleTypeDef hdma_adc1;
+DMA_HandleTypeDef hdma_adc2;
 
 I2C_HandleTypeDef hi2c4;
 
@@ -51,11 +138,20 @@ RTC_HandleTypeDef hrtc;
 
 SPI_HandleTypeDef hspi1;
 
+TIM_HandleTypeDef htim1;
+
 UART_HandleTypeDef huart4;
 UART_HandleTypeDef huart5;
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
-UART_HandleTypeDef huart3;
+DMA_HandleTypeDef hdma_uart4_rx;
+DMA_HandleTypeDef hdma_uart4_tx;
+DMA_HandleTypeDef hdma_uart5_rx;
+DMA_HandleTypeDef hdma_uart5_tx;
+DMA_HandleTypeDef hdma_usart1_rx;
+DMA_HandleTypeDef hdma_usart1_tx;
+DMA_HandleTypeDef hdma_usart2_rx;
+DMA_HandleTypeDef hdma_usart2_tx;
 
 /* USER CODE BEGIN PV */
 
@@ -63,17 +159,19 @@ UART_HandleTypeDef huart3;
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
+void PeriphCommonClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_I2C4_Init(void);
 static void MX_UART4_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_USART2_UART_Init(void);
-static void MX_USART3_UART_Init(void);
 static void MX_RTC_Init(void);
 static void MX_UART5_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_SPI1_Init(void);
+static void MX_ADC2_Init(void);
+static void MX_TIM1_Init(void);
 /* USER CODE BEGIN PFP */
 uint8_t rxData[2];
 uint8_t Modem_RX[1000];
@@ -87,8 +185,8 @@ uint8_t Debug_RX_Flag = 0;
 uint8_t debug_echo = 1;
 uint8_t adc_complete_flag1 = 0;
 uint8_t adc_complete_flag2 = 0;
-__IO uint32_t adc_results1[32];
-uint32_t adc_results2[32];
+__IO uint16_t adc_results1[41];
+uint32_t adc_results2[41];
 
 /* Variable to report ADC sequencer status */
 uint8_t         ubSequenceCompleted = RESET;     /* Set when all ranks of the sequence have been converted */
@@ -177,6 +275,26 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
   if(hadc == &hadc1)
   {
     ubSequenceCompleted = SET;
+    #if 0
+    printf("ADC 1: %5d(%04X) 2: %5d(%04X) 3: %5d(%04X) 4: %5d(%04X)\n", COMPUTATION_TEMPERATURE_STD_PARAMS_AVGSLOPE_V30(adc_results1[0]&0x0FFF), (adc_results1[0]&0x0FFF),
+            COMPUTATION_DIGITAL_12BITS_TO_VOLTAGE(adc_results1[1]&0x0FFF), (adc_results1[1]&0x0FFF),
+            (adc_results1[2]&0x0FFF), (adc_results1[2]&0x0FFF),
+            (adc_results1[3]&0x0FFF), (adc_results1[3]&0x0FFF));
+    #endif
+  }
+}
+void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef *hadc)
+{
+  /* Report to main program that ADC sequencer has reached its end */
+  if(hadc == &hadc1)
+  {
+    ubSequenceCompleted = SET;
+    #if 0
+    printf("ADC 1: %5d(%04X) 2: %5d(%04X) 3: %5d(%04X) 4: %5d(%04X)\n", COMPUTATION_TEMPERATURE_STD_PARAMS_AVGSLOPE_V30(adc_results1[0]&0x0FFF), (adc_results1[0]&0x0FFF),
+            COMPUTATION_DIGITAL_12BITS_TO_VOLTAGE(adc_results1[1]&0x0FFF), (adc_results1[1]&0x0FFF),
+            (adc_results1[2]&0x0FFF), (adc_results1[2]&0x0FFF),
+            (adc_results1[3]&0x0FFF), (adc_results1[3]&0x0FFF));
+    #endif
   }
 }
 
@@ -202,6 +320,7 @@ int main(void)
   uint16_t adcCount =0;
   uint8_t SPI_tx_data[4]={0,};
   uint8_t SPI_rx_data[4]={0,};
+  uint16_t i;
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -216,7 +335,11 @@ int main(void)
   /* Configure the system clock */
   SystemClock_Config();
 
+  /* Configure the peripherals common clocks */
+  PeriphCommonClock_Config();
+
   /* USER CODE BEGIN SysInit */
+  //HAL_Delay(100);
 
   /* USER CODE END SysInit */
 
@@ -227,11 +350,12 @@ int main(void)
   MX_UART4_Init();
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
-  MX_USART3_UART_Init();
   MX_RTC_Init();
   MX_UART5_Init();
   MX_ADC1_Init();
   MX_SPI1_Init();
+  MX_ADC2_Init();
+  MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
   HAL_UART_Receive_IT(&huart5, rxData, 1);
   HAL_UART_Receive_IT(&huart2, rxData, 1);
@@ -276,8 +400,14 @@ int main(void)
   	uint8_t endFlash = 1;
   	////////////////////
 #endif
-  //HAL_ADCEx_Calibration_Start(&hadc1);
-  HAL_ADC_Start_DMA(&hadc1, (uint32_t*) adc_results1, 4);
+  memset(adc_results1, 0, sizeof(adc_results1));
+  if (HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED) != HAL_OK)
+  {
+  /* Calibration Error */
+  printf("Calibration Error !\n");
+    Error_Handler();
+  }
+  HAL_ADC_Start_DMA(&hadc1, (uint32_t*) adc_results1, 6);
 
 #if 0
   //adc_done = 0;
@@ -355,7 +485,7 @@ int main(void)
     /*       Since DMA transfer has been initiated previously by function     */
     /*       "HAL_ADC_Start_DMA()", this function will keep DMA transfer      */
     /*       active.                                                          */
-  #if 0
+  #if 1
     if (HAL_ADC_Start(&hadc1) != HAL_OK)
     {
         printf("start Error\r\n");
@@ -382,7 +512,7 @@ int main(void)
     /*       sequence (ADC init parameter "EOCSelection" set             */
     /*       to ADC_EOC_SEQ_CONV) (this also induces that ADC            */
     /*       discontinuous mode must be disabled).                       */
-    #if 0
+    #if 1
     if (HAL_ADC_PollForEvent(&hadc1, ADC_EOSMP_EVENT, 10) != HAL_OK)
     {
         printf("adc event Error\r\n");
@@ -392,10 +522,23 @@ int main(void)
     if (ubSequenceCompleted == SET)
     {
         ubSequenceCompleted = RESET;
+        #if 0
         printf("ADC 1: %5d(%04X) 2: %5d(%04X) 3: %5d(%04X) 4: %5d(%04X)\n", (adc_results1[0]&0x0FFF), (adc_results1[0]&0x0FFF),
             (adc_results1[1]&0x0FFF), (adc_results1[1]&0x0FFF),
             (adc_results1[2]&0x0FFF), (adc_results1[2]&0x0FFF),
             (adc_results1[3]&0x0FFF), (adc_results1[3]&0x0FFF));
+        #endif
+        for(i=0; i<6; i++)
+        {
+            //printf("%2d: %4d(%04X)/%4d(%04X) ", i, ((adc_results1[i]>>16)&0x0000FFFF), ((adc_results1[i]>>16)&0x0000FFFF), (adc_results1[i]&0x0000FFFF), (adc_results1[i]&0x0000FFFF));
+            printf("%2d: %4d (%04X) ", i, (adc_results1[i]&0x0000FFFF), (adc_results1[i]&0x0000FFFF));
+        }
+        printf("\r\n");
+        #if 0
+        adc_results1[0]=0;
+        adc_results1[1]=0;
+        adc_results1[2]=0;
+        #endif
         //HAL_ADC_Start_DMA(&hadc1, (uint32_t*) adc_results1, 4);
     }
     #if 0
@@ -444,6 +587,7 @@ int main(void)
 			  adcIndex = 0;
 	  }
 #endif
+#if 0
 	  tickFreq =  HAL_GetTickFreq();
 	  if(Modem_RX_Flag & 0x02 )
 	  {
@@ -483,6 +627,7 @@ int main(void)
 	  {
 		  Modem_RX_Flag |= 0x02;
 	  }
+#endif
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -542,6 +687,31 @@ void SystemClock_Config(void)
 }
 
 /**
+  * @brief Peripherals Common Clock Configuration
+  * @retval None
+  */
+void PeriphCommonClock_Config(void)
+{
+  RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
+
+  /** Initializes the peripherals clock
+  */
+  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_ADC;
+  PeriphClkInit.AdcClockSelection = RCC_ADCCLKSOURCE_PLLSAI1;
+  PeriphClkInit.PLLSAI1.PLLSAI1Source = RCC_PLLSOURCE_HSI;
+  PeriphClkInit.PLLSAI1.PLLSAI1M = 1;
+  PeriphClkInit.PLLSAI1.PLLSAI1N = 8;
+  PeriphClkInit.PLLSAI1.PLLSAI1P = RCC_PLLP_DIV2;
+  PeriphClkInit.PLLSAI1.PLLSAI1Q = RCC_PLLQ_DIV2;
+  PeriphClkInit.PLLSAI1.PLLSAI1R = RCC_PLLR_DIV2;
+  PeriphClkInit.PLLSAI1.PLLSAI1ClockOut = RCC_PLLSAI1_ADC1CLK;
+  if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
+  {
+    Error_Handler();
+  }
+}
+
+/**
   * @brief ADC1 Initialization Function
   * @param None
   * @retval None
@@ -569,8 +739,8 @@ static void MX_ADC1_Init(void)
   hadc1.Init.ScanConvMode = ADC_SCAN_ENABLE;
   hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
   hadc1.Init.LowPowerAutoWait = DISABLE;
-  hadc1.Init.ContinuousConvMode = ENABLE;
-  hadc1.Init.NbrOfConversion = 4;
+  hadc1.Init.ContinuousConvMode = DISABLE;
+  hadc1.Init.NbrOfConversion = 5;
   hadc1.Init.DiscontinuousConvMode = DISABLE;
   hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
   hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
@@ -592,7 +762,7 @@ static void MX_ADC1_Init(void)
 
   /** Configure Regular Channel
   */
-  sConfig.Channel = ADC_CHANNEL_3;
+  sConfig.Channel = ADC_CHANNEL_TEMPSENSOR;
   sConfig.Rank = ADC_REGULAR_RANK_1;
   sConfig.SamplingTime = ADC_SAMPLETIME_2CYCLES_5;
   sConfig.SingleDiff = ADC_SINGLE_ENDED;
@@ -605,7 +775,7 @@ static void MX_ADC1_Init(void)
 
   /** Configure Regular Channel
   */
-  sConfig.Channel = ADC_CHANNEL_4;
+  sConfig.Channel = ADC_CHANNEL_VBAT;
   sConfig.Rank = ADC_REGULAR_RANK_2;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
@@ -614,7 +784,7 @@ static void MX_ADC1_Init(void)
 
   /** Configure Regular Channel
   */
-  sConfig.Channel = ADC_CHANNEL_TEMPSENSOR;
+  sConfig.Channel = ADC_CHANNEL_VREFINT;
   sConfig.Rank = ADC_REGULAR_RANK_3;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
@@ -623,8 +793,17 @@ static void MX_ADC1_Init(void)
 
   /** Configure Regular Channel
   */
-  sConfig.Channel = ADC_CHANNEL_VBAT;
+  sConfig.Channel = ADC_CHANNEL_3;
   sConfig.Rank = ADC_REGULAR_RANK_4;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Regular Channel
+  */
+  sConfig.Channel = ADC_CHANNEL_4;
+  sConfig.Rank = ADC_REGULAR_RANK_5;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -632,6 +811,64 @@ static void MX_ADC1_Init(void)
   /* USER CODE BEGIN ADC1_Init 2 */
   
   /* USER CODE END ADC1_Init 2 */
+
+}
+
+/**
+  * @brief ADC2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_ADC2_Init(void)
+{
+
+  /* USER CODE BEGIN ADC2_Init 0 */
+
+  /* USER CODE END ADC2_Init 0 */
+
+  ADC_ChannelConfTypeDef sConfig = {0};
+
+  /* USER CODE BEGIN ADC2_Init 1 */
+
+  /* USER CODE END ADC2_Init 1 */
+
+  /** Common config
+  */
+  hadc2.Instance = ADC2;
+  hadc2.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV1;
+  hadc2.Init.Resolution = ADC_RESOLUTION_12B;
+  hadc2.Init.DataAlign = ADC_DATAALIGN_RIGHT;
+  hadc2.Init.ScanConvMode = ADC_SCAN_DISABLE;
+  hadc2.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+  hadc2.Init.LowPowerAutoWait = DISABLE;
+  hadc2.Init.ContinuousConvMode = DISABLE;
+  hadc2.Init.NbrOfConversion = 1;
+  hadc2.Init.DiscontinuousConvMode = DISABLE;
+  hadc2.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+  hadc2.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
+  hadc2.Init.DMAContinuousRequests = DISABLE;
+  hadc2.Init.Overrun = ADC_OVR_DATA_PRESERVED;
+  hadc2.Init.OversamplingMode = DISABLE;
+  if (HAL_ADC_Init(&hadc2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Regular Channel
+  */
+  sConfig.Channel = ADC_CHANNEL_15;
+  sConfig.Rank = ADC_REGULAR_RANK_1;
+  sConfig.SamplingTime = ADC_SAMPLETIME_2CYCLES_5;
+  sConfig.SingleDiff = ADC_SINGLE_ENDED;
+  sConfig.OffsetNumber = ADC_OFFSET_NONE;
+  sConfig.Offset = 0;
+  if (HAL_ADC_ConfigChannel(&hadc2, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN ADC2_Init 2 */
+
+  /* USER CODE END ADC2_Init 2 */
 
 }
 
@@ -760,6 +997,60 @@ static void MX_SPI1_Init(void)
 }
 
 /**
+  * @brief TIM1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM1_Init(void)
+{
+
+  /* USER CODE BEGIN TIM1_Init 0 */
+
+  /* USER CODE END TIM1_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_SlaveConfigTypeDef sSlaveConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM1_Init 1 */
+
+  /* USER CODE END TIM1_Init 1 */
+  htim1.Instance = TIM1;
+  htim1.Init.Prescaler = 0;
+  htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim1.Init.Period = 65535;
+  htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim1.Init.RepetitionCounter = 0;
+  htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim1, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sSlaveConfig.SlaveMode = TIM_SLAVEMODE_DISABLE;
+  sSlaveConfig.InputTrigger = TIM_TS_ITR0;
+  if (HAL_TIM_SlaveConfigSynchro(&htim1, &sSlaveConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterOutputTrigger2 = TIM_TRGO2_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM1_Init 2 */
+
+  /* USER CODE END TIM1_Init 2 */
+
+}
+
+/**
   * @brief UART4 Initialization Function
   * @param None
   * @retval None
@@ -775,7 +1066,7 @@ static void MX_UART4_Init(void)
 
   /* USER CODE END UART4_Init 1 */
   huart4.Instance = UART4;
-  huart4.Init.BaudRate = 115200;
+  huart4.Init.BaudRate = 1200;
   huart4.Init.WordLength = UART_WORDLENGTH_8B;
   huart4.Init.StopBits = UART_STOPBITS_1;
   huart4.Init.Parity = UART_PARITY_NONE;
@@ -900,41 +1191,6 @@ static void MX_USART2_UART_Init(void)
 }
 
 /**
-  * @brief USART3 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_USART3_UART_Init(void)
-{
-
-  /* USER CODE BEGIN USART3_Init 0 */
-
-  /* USER CODE END USART3_Init 0 */
-
-  /* USER CODE BEGIN USART3_Init 1 */
-
-  /* USER CODE END USART3_Init 1 */
-  huart3.Instance = USART3;
-  huart3.Init.BaudRate = 115200;
-  huart3.Init.WordLength = UART_WORDLENGTH_8B;
-  huart3.Init.StopBits = UART_STOPBITS_1;
-  huart3.Init.Parity = UART_PARITY_NONE;
-  huart3.Init.Mode = UART_MODE_TX_RX;
-  huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart3.Init.OverSampling = UART_OVERSAMPLING_16;
-  huart3.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
-  huart3.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
-  if (HAL_UART_Init(&huart3) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN USART3_Init 2 */
-
-  /* USER CODE END USART3_Init 2 */
-
-}
-
-/**
   * Enable DMA controller clock
   */
 static void MX_DMA_Init(void)
@@ -942,11 +1198,39 @@ static void MX_DMA_Init(void)
 
   /* DMA controller clock enable */
   __HAL_RCC_DMA1_CLK_ENABLE();
+  __HAL_RCC_DMA2_CLK_ENABLE();
 
   /* DMA interrupt init */
   /* DMA1_Channel1_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
+  /* DMA1_Channel2_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel2_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel2_IRQn);
+  /* DMA1_Channel4_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel4_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel4_IRQn);
+  /* DMA1_Channel5_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel5_IRQn);
+  /* DMA1_Channel6_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel6_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel6_IRQn);
+  /* DMA1_Channel7_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel7_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel7_IRQn);
+  /* DMA2_Channel1_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Channel1_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Channel1_IRQn);
+  /* DMA2_Channel2_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Channel2_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Channel2_IRQn);
+  /* DMA2_Channel3_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Channel3_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Channel3_IRQn);
+  /* DMA2_Channel5_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Channel5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Channel5_IRQn);
 
 }
 
@@ -964,16 +1248,20 @@ static void MX_GPIO_Init(void)
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(FLASH_CS_GPIO_Port, FLASH_CS_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(NRESET_GPIO_Port, NRESET_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOD, NRESET_Pin|MCU_RUN_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOD, PWRKEY_Pin|RF_POWER_Pin, GPIO_PIN_SET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(ENABLE_FLASH_GPIO_Port, ENABLE_FLASH_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin : FLASH_CS_Pin */
   GPIO_InitStruct.Pin = FLASH_CS_Pin;
@@ -982,12 +1270,24 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
   HAL_GPIO_Init(FLASH_CS_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : NRESET_Pin */
-  GPIO_InitStruct.Pin = NRESET_Pin;
+  /*Configure GPIO pins : NFC_VOUT_Pin FD_Pin */
+  GPIO_InitStruct.Pin = NFC_VOUT_Pin|FD_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : NRESET_Pin MCU_RUN_Pin */
+  GPIO_InitStruct.Pin = NRESET_Pin|MCU_RUN_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(NRESET_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : NETLIGHT_Pin */
+  GPIO_InitStruct.Pin = NETLIGHT_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(NETLIGHT_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : PWRKEY_Pin RF_POWER_Pin */
   GPIO_InitStruct.Pin = PWRKEY_Pin|RF_POWER_Pin;
@@ -995,6 +1295,19 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : SENSE_PV_Pin SENSE_CRITICAL_Pin SENSE_WARNING_Pin SENSE_TC_Pin */
+  GPIO_InitStruct.Pin = SENSE_PV_Pin|SENSE_CRITICAL_Pin|SENSE_WARNING_Pin|SENSE_TC_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : ENABLE_FLASH_Pin */
+  GPIO_InitStruct.Pin = ENABLE_FLASH_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(ENABLE_FLASH_GPIO_Port, &GPIO_InitStruct);
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
 /* USER CODE END MX_GPIO_Init_2 */

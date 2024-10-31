@@ -59,12 +59,30 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define FLASH_CS_Pin GPIO_PIN_4
 #define FLASH_CS_GPIO_Port GPIOA
+#define NFC_VOUT_Pin GPIO_PIN_2
+#define NFC_VOUT_GPIO_Port GPIOB
 #define NRESET_Pin GPIO_PIN_8
 #define NRESET_GPIO_Port GPIOD
+#define NETLIGHT_Pin GPIO_PIN_9
+#define NETLIGHT_GPIO_Port GPIOD
+#define MCU_RUN_Pin GPIO_PIN_10
+#define MCU_RUN_GPIO_Port GPIOD
 #define PWRKEY_Pin GPIO_PIN_11
 #define PWRKEY_GPIO_Port GPIOD
 #define RF_POWER_Pin GPIO_PIN_15
 #define RF_POWER_GPIO_Port GPIOD
+#define SENSE_PV_Pin GPIO_PIN_6
+#define SENSE_PV_GPIO_Port GPIOC
+#define SENSE_CRITICAL_Pin GPIO_PIN_7
+#define SENSE_CRITICAL_GPIO_Port GPIOC
+#define SENSE_WARNING_Pin GPIO_PIN_8
+#define SENSE_WARNING_GPIO_Port GPIOC
+#define SENSE_TC_Pin GPIO_PIN_9
+#define SENSE_TC_GPIO_Port GPIOC
+#define ENABLE_FLASH_Pin GPIO_PIN_8
+#define ENABLE_FLASH_GPIO_Port GPIOA
+#define FD_Pin GPIO_PIN_3
+#define FD_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
 
